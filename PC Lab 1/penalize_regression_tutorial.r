@@ -18,6 +18,8 @@ print(paste0('Test set: ',nrow(test),' obs'))
 cor <- round(cor(train[,c(1:25)]),2) # Variable 26 is the depedendent variable
 corrplot(cor)
 
+# strong correlation between parents education -> evidence for marital sorting
+
 ########################  Estimation of the linear regression  ########################
 
 ols <- lm(G3 ~ ., data = train)
@@ -33,7 +35,7 @@ print(predMSEols)
 
 ########################  OLS model  ########################
 
-ols_small <- lm(??? , data = train)
+ols_small <- lm(G3 ~ sex + failures , data = train)
 
 # Calculate the MSE
 test$predols_small <- predict(ols_small, newdata = test)
@@ -52,7 +54,7 @@ print(predMSEols_small)
 
 # Estimate a Lasso model
 lasso <- glmnet(as.matrix(train[,c(1:25)]), train$G3, alpha = 1) # We save the model under the name "lasso"
-plot(lasso, xvar = "lambda", label = TRUE)
+plot(lasso, xvar = "lambda", label = TRUE, sign.lambda = 1)
 
 ###############################################################
 
@@ -69,7 +71,7 @@ set.seed(27112019)
 lasso.cv <- cv.glmnet(as.matrix(train[,c(1:25)]), train$G3, type.measure = "mse", nfolds = 5, alpha = 1)
 
 # Plot the MSE for the different lambda values
-plot(lasso.cv)
+plot(lasso.cv, sign.lambda = 1)
 
 #####################################################################
 
@@ -98,6 +100,7 @@ coef_lasso1 <- coef(lasso.cv, s = "lambda.min")
 # The control variables "newx" are from the test sample
 
 # Fitted values
+# important to use covariates from the test sample
 test$predlasso <- predict(lasso.cv, newx = as.matrix(test[,c(1:25)]), s = lasso.cv$lambda.min)
 
 # Calculate the MSE
@@ -112,10 +115,10 @@ print(paste0("MSE: ", predMSElasso))
 set.seed(27112025) # 27112024
 
 # Re-estimate the Lasso model
-lasso.cv <- cv.glmnet(???)
+lasso.cv <- cv.glmnet(as.matrix(train[,c(1:25)]), train$G3, type.measure = "mse", nfolds = 5, alpha = 1)
 
 # Store the coefficients
-coef_lasso2 <- coef(lasso.cv, s = ???)
+coef_lasso2 <- coef(lasso.cv, s = "lambda.min")
 print(cbind(coef_lasso1, coef_lasso2))
 
 # Calculate the fitted values
@@ -124,16 +127,17 @@ test$predlasso2 <- predict(lasso.cv, newx = as.matrix(test[,c(1:25)]), s = lasso
 # Correlation between the fitted values of the two Lasso models
 cor_fit <- cor(test$predlasso,test$predlasso2)
 print(paste0("Correlation between fitted values: ", cor_fit))
+# model depends on the chosen seed, can go in both directions
 
 ########################  Ridge Path  ########################
 
 # alpha = 0 specifies a Ridge model
 
 # Estimate the Ridge
-ridge <- glmnet(as.matrix(train[,c(1:25)]), train$G3, alpha = ???)
+ridge <- glmnet(as.matrix(train[,c(1:25)]), train$G3, alpha = 0)
 
 # Plot the path of the Ridge coefficients
-plot(ridge, xvar = "lambda", label = TRUE)
+plot(ridge, xvar = "lambda", label = TRUE, sign.lambda = 1)
 
 ###############################################################
 
@@ -143,18 +147,18 @@ plot(ridge, xvar = "lambda", label = TRUE)
 set.seed(27112019)
 
 # Cross-validate the Ridge model 
-ridge.cv <- cv.glmnet(???)
+ridge.cv <- cv.glmnet(as.matrix(train[,c(1:25)]), train$G3, type.measure = "mse", nfolds = 5, alpha = 0)
 
 # Plot the MSE in the cross-validation samples
-plot(ridge.cv)
+plot(ridge.cv, sign.lambda = 1)
 
 #####################################################################
 
 ########################  Optimal Lambda Value  ########################
 
 # Print the optimal lambda value
-print(paste0("Optimal lambda that minimizes cross-validated MSE: ", ???))
-print(paste0("Optimal lambda using one-standard-error-rule: ", ???))
+print(paste0("Optimal lambda that minimizes cross-validated MSE: ", ridge.cv$lambda.min))
+print(paste0("Optimal lambda using one-standard-error-rule: ", ridge.cv$lambda.1se))
 
 #########################################################################
 
@@ -171,11 +175,13 @@ coef_ridge <- coef(ridge.cv, s = "lambda.min")
 ########################  Test Sample MSE  ########################
 
 # Estimate fitted values in test sample
-test$predridge <- predict(ridge, newx = ???, s = ???)
+test$predridge <- predict(ridge, newx = as.matrix(test[,c(1:25)]), s = ridge.cv$lambda.min)
 
 # Calculate the MSE
-predMSEridge <- ???
+predMSEridge <- mean((test$G3 - test$predridge)^2)
 print(paste0("MSE: ", predMSEridge))
+
+# seems to be the case that we have a dense model, not a sparse model?
 
 ###################################################################
 
