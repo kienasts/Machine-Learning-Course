@@ -23,14 +23,14 @@ print('Packages and data successfully loaded.')
 
 ########################  Average Spending  ########################
 
-spending <- round(???, digits=2)
+spending <- round(mean(y_2006), digits=2)
 print(paste0("In 2006, the average spending is ", spending, " US-dollars"))
 
 ####################################################################
 
 ########################  Online Time  ########################
 
-freq <- round(x_2006[id_2006==921,x_2006[id_2006==921,] == ???], digit = 0)
+freq <- round(x_2006[id_2006==921,x_2006[id_2006==921,] == max(x_2006[id_2006==921,])], digit = 0)
 page <- names(freq)
 
 print(paste0("Household 921 is most of the time on the webpage ", page))
@@ -40,7 +40,7 @@ print(paste0(freq, "% of the online time is the household on this webpage"))
 
 ########################  Log Transformation  ########################
 
-log_y_2006 = as.matrix(???) # take logarithm
+log_y_2006 = as.matrix(log(y_2006)) # take logarithm
 
 # Cumulative Distribution of Spending
 plot(ecdf(y_2006), xlab = "Spending in US-Dollars", sub = "(Truncated at 20,000 US-Dollars)",
@@ -76,6 +76,11 @@ shallow_tree <- rpart(formula = outcome ~., data = tree_data_2006, method = "ano
 # The algorithm 'rpart' stops growing trees when either one leave has less than 100 observations or 
 # the MSE gain of addidng one addidtional leave is below cp=0.00002.
 
+# class; can switch it to classification
+# y if we are interested in predictions
+# cp, criterium for optimization, here MSE
+# minibucket, minimum number of observations in terminal leaves 
+
 ## Plot tree structure
 rpart.plot(shallow_tree,digits=3)
 
@@ -86,7 +91,8 @@ rpart.plot(shallow_tree,digits=3)
 
 ########################  Deep Tree  ########################
 set.seed(1001)
-deep_tree <- rpart(formula = outcome ~., data = tree_data_2006, ???)
+deep_tree <- rpart(formula = outcome ~., data = tree_data_2006, method = "anova", xval = 10,
+                   y = TRUE, control = rpart.control(cp = 0.00002, minbucket=10))
 
 print('Relative CV-MSE for different tree sizes')
 print(deep_tree$cptable)
@@ -111,7 +117,7 @@ print(paste0("Optimal number final leaves: ", op.size))
 cp.vals <- deep_tree$cptable[op.index, "CP"]
 
 # Prune the deep tree
-pruned_tree <- prune(???, cp = cp.vals)
+pruned_tree <- prune(deep_tree, cp = cp.vals)
 
 ## Plot tree structure
 rpart.plot(pruned_tree,digits=3)
@@ -123,7 +129,7 @@ rpart.plot(pruned_tree,digits=3)
 ########################  Out-of-Sample Performance  ########################
 
 # Predict log online spending 
-pred_tree <- predict(???, newdata= as.data.frame(x_2006))
+pred_tree <- predict(pruned_tree, newdata= as.data.frame(x_2006))
 
 # Test sample data
 outcome_test <- log_y_2006[-training_set]
@@ -151,18 +157,24 @@ forest1 <- regression_forest(x_2006[training_set,],log_y_2006[training_set,],
 
 print('Forest is built.')
 
+# mtry: number of covariates randomly selected for each tree
+# honesty: important for correct inference (SEs), prediction power does not improve
+
 ##################################################################
 
 ########################  Plot Example Tree  ########################
 
 # Plot a tree of the forest
 # Just an illustration, overall the forest contains 1000 trees
-tree <- get_tree(???,1) # here we select tree number 1
+tree <- get_tree(forest1,1) # here we select tree number 1
 plot(tree)
 
 #####################################################################
 
 ########################  Variable Importance  ########################
+
+# problem of hierarchical tree structure, 1st sample split is more important than the following splits.
+# Contribution to prediction power decreases with depth of the tree. Have to take into account level at which splits occur.
 
 # Plot the variable importantance
 # First we consider only first split
@@ -173,12 +185,17 @@ print(cbind(colnames(x_2006[,imp1>0.02]),imp1[imp1>0.02]))
 imp2 <- round(variable_importance(forest1, decay.exponent = 2, max.depth = 4), digits = 3)
 print(cbind(colnames(x_2006[,imp2>0.02]),imp2[imp2>0.02]))
 
+# have to be careful with varimp
+# problematic when two covariates are strongly correlated
+# -> importance of both covariates is low, even though they are important for prediction
+
 ########################################################################
 
 ########################  Out-of-Sample Performance  ########################
 
 # Prediction
-fit <- predict(???, newdata = x_2006[-training_set,])$predictions
+fit <- predict(forest1, newdata = x_2006[-training_set,])$predictions
+predict(forest1, newdata = x_2006[-training_set,], estimate.variance = TRUE) # can also get SEs for predictions
 
 # R-squared
 SST <- mean(((log_y_2006[-training_set,])-mean((log_y_2006[-training_set,])))^2)
@@ -219,7 +236,8 @@ abline(a=0,b=0, col="red")
 min_obs <- 5
 # Build Forest
 forest2 <- regression_forest(x_2006[training_set,],log_y_2006[training_set,], 
-                            ???)
+                             mtry = floor(cov*ncol(x_2006)), sample.fraction = frac, num.trees = rep, 
+                             min.node.size = min_obs, honesty=FALSE)
 
 # Prediction
 fit <- predict(forest2, newdata = x_2006[-training_set,])$predictions
@@ -239,7 +257,7 @@ plot(tree)
 ########################  Store Prediction for Hold-out-Sample  ########################
 
 # Hold-out-Sample Prediction
-fit_new <- predict(???, newdata = x_new)$predictions
+fit_new <- predict(forest2, newdata = x_new)$predictions
 
 results <- as.matrix(cbind(id_new,fit_new)) # store ID's and predictions in oine matrix
 colnames(results) <- c("id","predictions") # label columns
