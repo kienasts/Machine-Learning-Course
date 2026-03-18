@@ -57,7 +57,7 @@ set.seed(1001)
 # Generate variable with the rows in training data
 size <- floor(0.5 * nrow(data_2006))
 training_set <- sample(seq_len(nrow(data_2006)), size = size)
-
+  
 print('Training and test samples created.')
 
 #############################################################################
