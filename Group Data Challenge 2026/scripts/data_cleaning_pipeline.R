@@ -304,12 +304,35 @@ for (df_name in c("train", "test", "new_hires")) {
   assign(df_name, df)
 }
 
+# --- (d) Numeric × categorical interactions ---
+# List the categorical variables (nominal or ordinal) to interact with ALL
+# continuous variables in cont_vars. Factor/ordered columns are converted to
+# their integer code so each interaction remains a single numeric column
+# suitable for glmnet. Add or remove entries as needed.
+cat_interact_vars <- c("sex", "region", "schltype", "degfield", "education")
+
+# Build one column per (cont_var × cat_interact_var) pair across all datasets.
+interaction_cols <- c()   # populated below; added to feature_cols in Step 9
+
+for (df_name in c("train", "test", "new_hires")) {
+  df <- get(df_name)
+  for (cv in cont_vars) {
+    for (iv in cat_interact_vars) {
+      col_name <- paste0(cv, "_x_", iv)
+      df[[col_name]] <- df[[cv]] * as.integer(df[[iv]])
+      if (df_name == "train") interaction_cols <- c(interaction_cols, col_name)
+    }
+  }
+  assign(df_name, df)
+}
+
 # =============================================================================
 # STEP 9: BUILD DESIGN MATRICES  (model.matrix for Lasso / Ridge / Trees)
 # =============================================================================
 
 feature_cols <- c(cont_vars,
                   "log_hours", "exp_yos", "exp2_yos", "family_burden",
+                  interaction_cols,
                   bin_vars, cat_vars)
 
 # Formula: all features, no intercept (glmnet adds its own)
