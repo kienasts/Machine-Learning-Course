@@ -455,7 +455,19 @@ results$ridge <- list(
   lambda  = cv_ridge$lambda.min
 )
 
-# --- (c) DECISION TREE (cp tuned via caret) ---
+# --- (c) OLS ---
+# lm.fit is used directly on the matrix; it handles rank-deficient designs by
+# silently dropping linearly dependent columns (returns NA coefficients for them).
+ols_fit        <- lm.fit(x = cbind(1, X_train), y = y_train)
+ols_coef       <- ols_fit$coefficients
+ols_coef[is.na(ols_coef)] <- 0   # zero out dropped columns so prediction still works
+pred_ols_test  <- cbind(1, X_test) %*% ols_coef
+results$ols <- list(
+  model = ols_fit,
+  coef  = ols_coef,
+  rmse  = rmse(y_test, pred_ols_test),
+  mae   = mae(y_test,  pred_ols_test)
+)
 ctrl_tree <- trainControl(method = "cv", number = 10)
 grid_tree <- expand.grid(cp = seq(0.0001, 0.05, length.out = 20))
 tree_fit  <- train(x = as.data.frame(X_train), y = y_train,
@@ -470,7 +482,7 @@ results$tree <- list(
   best_cp = tree_fit$bestTune$cp
 )
 
-# --- (d) RANDOM FOREST (mtry tuned via caret; 5-fold CV for speed) ---
+# --- (e) RANDOM FOREST (mtry tuned via caret; 5-fold CV for speed) ---
 ctrl_rf  <- trainControl(method = "cv", number = 5)
 grid_rf  <- expand.grid(mtry = c(floor(sqrt(ncol(X_train))),
                                   floor(ncol(X_train) / 3),
@@ -493,10 +505,10 @@ results$rf <- list(
 # =============================================================================
 
 comparison <- data.frame(
-  Model  = c("Lasso", "Ridge", "Tree", "RandomForest"),
-  RMSE   = c(results$lasso$rmse, results$ridge$rmse,
+  Model  = c("OLS", "Lasso", "Ridge", "Tree", "RandomForest"),
+  RMSE   = c(results$ols$rmse,   results$lasso$rmse, results$ridge$rmse,
              results$tree$rmse,  results$rf$rmse),
-  MAE    = c(results$lasso$mae,  results$ridge$mae,
+  MAE    = c(results$ols$mae,    results$lasso$mae,  results$ridge$mae,
              results$tree$mae,   results$rf$mae)
 )
 comparison <- comparison[order(comparison$RMSE), ]   # inspect comparison to pick best model
@@ -508,6 +520,7 @@ best_model_name <- comparison$Model[1]   # model with lowest validation RMSE
 # =============================================================================
 
 best_preds <- switch(best_model_name,
+  "OLS"          = as.vector(cbind(1, X_new_hires) %*% results$ols$coef),
   "Lasso"        = as.vector(predict(results$lasso$model, X_new_hires, s = "lambda.min")),
   "Ridge"        = as.vector(predict(results$ridge$model, X_new_hires, s = "lambda.min")),
   "Tree"         = predict(results$tree$model, as.data.frame(X_new_hires)),

@@ -6,8 +6,10 @@ packages <- c(
   "rpart",
   "caret", 
   "glmnet",
-  "randomForest",
   "rpart",
+  "rpart.plot",
+  "grf",
+  "randomForest",
   "corrplot"
 )
 install.packages(setdiff(packages, rownames(installed.packages())), type = "binary")
@@ -331,12 +333,101 @@ stopifnot("Column mismatch train/test" = identical(colnames(X_train), colnames(X
 stopifnot("Column mismatch train/new_hires" = identical(colnames(X_train), colnames(X_new_hires)))
 
 
-setdiff(colnames(X_train), colnames(X_test))
-setdiff(colnames(X_train), colnames(X_new_hires))
+
+
+# Fit Models --------------------------------------------------------------
+
+mse <- function(actual, pred) mean((actual - pred)^2)
+results <- list()
+
+# OLS
+ols_fit <- lm.fit(x = cbind(1, X_train), y = y_train)
+ols_coef <- ols_fit$coefficients
+ols_coef[is.na(ols_coef)] <- 0
+pred_ols_test <- cbind(1, X_test) %*% ols_coef
+results$ols <- list(
+  model = ols_fit,
+  coef  = ols_coef,
+  mse  = mse(y_test, pred_ols_test)
+)
+
+# LASSO
+lasso_cv <- cv.glmnet(X_train, y_train, type.measure = "mse", alpha = 1, nfolds = 10)
+plot(lasso_cv, sign.lambda = 1)
+pred_lasso_test <- predict(lasso_cv, X_test, s = lasso_cv$lambda.min)
+results$lasso <- list(
+  model   = lasso_cv,
+  mse    = mse(y_test, pred_lasso_test),
+  lambda  = lasso_cv$lambda.min
+)
+
+# RIDGE
+ridge_cv <- cv.glmnet(X_train, y_train, type.measure = "mse", alpha = 0, nfolds = 10)
+plot(ridge_cv, sign.lambda = 1)
+pred_ridge_test <- predict(ridge_cv, X_test, s = ridge_cv$lambda.min)
+results$ridge <- list(
+  model   = ridge_cv,
+  mse    = mse(y_test, pred_ridge_test),
+  lambda  = ridge_cv$lambda.min
+)
+
+# TREE
+tree_data_test <- data.frame(y_train, X_train)
+tree <- rpart(formula = y_train ~., data = tree_data_test,
+              method = "anova", xval = 10,
+              y = TRUE, control = rpart.control(cp = 0.00002, minibucket = 10))
+print(tree$cptable)
+plotcp(tree)
+
+op_index <- which.min(tree$cptable[, "xerror"])
+op_size <- tree$cptable[op_index, "nsplit"] + 1
+print(paste0("Optimal number final leaves: ", op_size))
+
+cp_vals <- tree$cptable[op_index, "CP"]
+pruned_tree <- prune(tree, cp = cp_vals)
+rpart.plot(pruned_tree, digits = 3)
+
+
+
+# Model Comparison --------------------------------------------------------
+
+comparison <- data.frame(
+  Model  = c("OLS", "Lasso", "Ridge", "Tree", "RandomForest"),
+  MSE   = c(results$ols$mse,   results$lasso$mse, results$ridge$mse,
+             results$tree$mse,  results$rf$mse)
+)
+comparison <- comparison[order(comparison$RMSE), ]   # inspect comparison to pick best model
+
+best_model_name <- comparison$Model[1]   # model with lowest validation RMSE
 
 
 
 
 
 
+
+
+
+
+
+
+
+
+# --- (e) RANDOM FOREST (mtry tuned via caret; 5-fold CV for speed) ---
+ctrl_rf  <- trainControl(method = "cv", number = 5)
+grid_rf  <- expand.grid(mtry = c(floor(sqrt(ncol(X_train))),
+                                 floor(ncol(X_train) / 3),
+                                 floor(ncol(X_train) / 2)))
+rf_fit   <- train(x = as.data.frame(X_train), y = y_train,
+                  method    = "rf",
+                  ntree     = 500,
+                  trControl = ctrl_rf,
+                  tuneGrid  = grid_rf)
+pred_rf_test <- predict(rf_fit, as.data.frame(X_test))
+results$rf <- list(
+  model    = rf_fit,
+  rmse     = rmse(y_test, pred_rf_test),
+  mae      = mae(y_test,  pred_rf_test),
+  best_mtry = rf_fit$bestTune$mtry
+)
 

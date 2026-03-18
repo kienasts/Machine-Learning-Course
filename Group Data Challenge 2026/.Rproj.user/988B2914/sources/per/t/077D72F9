@@ -3,25 +3,25 @@
     "path": "~/Desktop/Github/Machine-Learning-Course/Group Data Challenge 2026/scripts/group-assignment.R",
     "project_path": "scripts/group-assignment.R",
     "type": "r_source",
-    "hash": "2383906703",
+    "hash": "2263046653",
     "contents": "",
     "dirty": false,
     "created": 1773419564983.0,
     "source_on_save": false,
-    "relative_order": 1,
+    "relative_order": 2,
     "properties": {
         "tempName": "Untitled1",
         "source_window_id": "",
         "Source": "Source",
-        "cursorPosition": "238,23",
-        "scrollLine": "230"
+        "cursorPosition": "392,0",
+        "scrollLine": "371"
     },
     "folds": "",
-    "lastKnownWriteTime": 1773845700,
+    "lastKnownWriteTime": 1773856384,
     "encoding": "UTF-8",
     "collab_server": "",
     "source_window": "",
-    "last_content_update": 1773845700436,
+    "last_content_update": 1773856384182,
     "read_only": false,
     "read_only_alternatives": []
 }
