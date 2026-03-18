@@ -74,8 +74,16 @@ check_fix_var_types <- function(df, intended, label){
     if (!var %in% names(df)) next
     actual <- class(df[[var]])
     if (actual == "character") {
-      df[[var]] <- suppressWarnings(as.integer(df[[var]]))
+      parsed <- suppressWarnings(as.integer(df[[var]]))
+      if (all(is.na(parsed) == is.na(df[[var]]))) {
+        df[[var]] <- parsed
+      } else {
+        lvls <- sort(unique(df[[var]][!is.na(df[[var]])]))
+        if (length(lvls) != 2) warning(paste0("Variable ", var, ": length differs from 2."))
+        df[[var]] <- as.integer(df[[var]] == lvls[2])
+      }
     }
+    
     else if (actual == "factor") {
       df[[var]] <- as.integer(as.character(df[[var]]))
     }
@@ -106,7 +114,6 @@ new_hires <- check_fix_var_types(new_hires_raw, intended_types)
 sapply(wage_training, class)
 lapply(wage_training[sapply(wage_training, is.factor)], levels)
 names(wage_training)[sapply(wage_training, is.character)]
-
 sapply(new_hires, class)
 lapply(new_hires[sapply(new_hires, is.factor)], levels)
 names(new_hires)[sapply(new_hires, is.character)]
@@ -116,28 +123,51 @@ names(new_hires)[sapply(new_hires, is.character)]
 # Train / Test Split ------------------------------------------------------
 
 set.seed(1001)
+training_set_idx <- sample(seq_len(nrow(wage_training)), size = floor(0.5 * nrow(wage_training)))
+train <- wage_training[training_set_idx, ]
+test <- wage_training[-training_set_idx, ]
 
-training_idx <- sample(seq_len(nrow(wage_training)), size = floor(0.5 * nrow(wage_training)))
-
-wage_training$quintile_strat <- cut(wage_training$lwwage,
-                                   breaks = quantile(wage_training$lwwage, probs = seq(0, 1, by = 0.2)),
-                                   include.lowest = TRUE, labels = FALSE)
-
-training_set_stratq <- createDataPartition(wage_training$quintile_strat, p = 0.5, list = FALSE)
-wage_training$quintile_strat <- NULL
+y_train <- train$lwwage
+y_test <- test$lwwage
 
 
 
+# Missing Data ------------------------------------------------------------
+
+cont_vars <- c("yos", "exp", "exp2", "age", "famsize", "nchlt5", "hoursworked")
+bin_vars <- c("sex", "hispanic", "vetstat", "dchlt5", "dchlt19", "msa")
+cat_vars_nom <- c("marst", "race", "degfield", "educd", "education", "ind1990c", "occ2010c", "region", "metro")
+cat_vars_ord <- c("speakeng", "hw")
+
+colMeans(is.na(train))
+
+zero_var <- sapply(train, function(x) length(unique(x[!is.na(x)])) < 2)
+cat("Zero-variance variables:", names(which(zero_var)), "\n")
+train <- train[, !zero_var]
+test  <- test[,  names(train)]
+
+colSums(is.na(train))
+colSums(is.na(test))
 
 
 
+# Outliers ----------------------------------------------------------------
 
 
 
+# Categorical Variables ---------------------------------------------------
 
+# Rare category pooling
+rare_levels <- lapply(train[cat_vars_nom], function(x) {
+  freq <- prop.table(table(x))
+  names(freq[freq < 0.02])
+})
 
-
-
-
-
+for (var in cat_vars_nom) {
   
+}
+
+
+
+
+
