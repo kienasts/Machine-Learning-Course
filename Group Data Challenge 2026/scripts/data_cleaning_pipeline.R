@@ -304,15 +304,31 @@ for (df_name in c("train", "test", "new_hires")) {
   assign(df_name, df)
 }
 
-# --- (d) Numeric × categorical interactions ---
-# List the categorical variables (nominal or ordinal) to interact with ALL
-# continuous variables in cont_vars. Factor/ordered columns are converted to
-# their integer code so each interaction remains a single numeric column
-# suitable for glmnet. Add or remove entries as needed.
+# --- (d) Continuous × continuous pairwise interactions ---
+# All unique pairs of continuous variables are multiplied together.
+# Lasso in Step 12 will zero out irrelevant pairs automatically.
+cont_x_cont_cols <- c()   # populated below; added to feature_cols in Step 9
+
+cont_pairs <- combn(cont_vars, 2, simplify = FALSE)
+
+for (df_name in c("train", "test", "new_hires")) {
+  df <- get(df_name)
+  for (p in cont_pairs) {
+    col_name <- paste0(p[1], "_x_", p[2])
+    df[[col_name]] <- df[[p[1]]] * df[[p[2]]]
+    if (df_name == "train") cont_x_cont_cols <- c(cont_x_cont_cols, col_name)
+  }
+  assign(df_name, df)
+}
+
+# --- (e) Continuous × categorical interactions ---
+# Specify which categorical variables (nominal or ordinal) to interact with ALL
+# continuous variables. Factor/ordered columns are converted to their integer
+# code so each interaction remains a single numeric column suitable for glmnet.
+# Add or remove entries from cat_interact_vars as needed.
 cat_interact_vars <- c("sex", "region", "schltype", "degfield", "education")
 
-# Build one column per (cont_var × cat_interact_var) pair across all datasets.
-interaction_cols <- c()   # populated below; added to feature_cols in Step 9
+cont_x_cat_cols <- c()   # populated below; added to feature_cols in Step 9
 
 for (df_name in c("train", "test", "new_hires")) {
   df <- get(df_name)
@@ -320,7 +336,7 @@ for (df_name in c("train", "test", "new_hires")) {
     for (iv in cat_interact_vars) {
       col_name <- paste0(cv, "_x_", iv)
       df[[col_name]] <- df[[cv]] * as.integer(df[[iv]])
-      if (df_name == "train") interaction_cols <- c(interaction_cols, col_name)
+      if (df_name == "train") cont_x_cat_cols <- c(cont_x_cat_cols, col_name)
     }
   }
   assign(df_name, df)
@@ -332,7 +348,8 @@ for (df_name in c("train", "test", "new_hires")) {
 
 feature_cols <- c(cont_vars,
                   "log_hours", "exp_yos", "exp2_yos", "family_burden",
-                  interaction_cols,
+                  cont_x_cont_cols,
+                  cont_x_cat_cols,
                   bin_vars, cat_vars)
 
 # Formula: all features, no intercept (glmnet adds its own)

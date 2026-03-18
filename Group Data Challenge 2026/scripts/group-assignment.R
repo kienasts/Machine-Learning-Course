@@ -236,28 +236,34 @@ test  <- add_polynomials(test, cont_vars, degree = 7)
 new_hires <- add_polynomials(new_hires, cont_vars, degree = 7)
 
 # Interactions (continuous x continuous)
-add_interactions <- function(data, vars) {
-  pairs <- combn(vars, 2, simplify = FALSE)
-  int_cols <- lapply(pairs, function(p) {
-    set_names(data.frame(data[[p[1]]] * data[[p[2]]]), paste0(p[1], "_x_", p[2]))
-  })
-  bind_cols(data, do.call(bind_cols, int_cols))
-}
+cont_x_cont_cols <- c()
+cont_pairs <- combn(cont_vars, 2, simplify = FALSE)
 
-train <- add_interactions(train, cont_vars)
-test  <- add_interactions(test, cont_vars)
-new_hires <- add_interactions(new_hires, cont_vars)
+for (df_name in c("train", "test", "new_hires")) {
+  df <- get(df_name)
+  for (p in cont_pairs) {
+    col_name <- paste0(p[1], "_x_", p[2])
+    df[[col_name]] <- df[[p[1]]] * df[[p[2]]]
+    if (df_name == "train") cont_x_cont_cols <- c(cont_x_cont_cols, col_name)
+  }
+  assign(df_name, df)
+}
 
 # Interactions (categorical x continuous)
 cat_interact_vars <- c("sex", "marst", "race", "region")
-
-interaction_cols <- c()
+cont_x_cat_cols <- c()
 
 for (df_name in c("train", "test", "new_hires")) {
-  df <- get_(df_name)
-  for (cv in )
+  df <- get(df_name)
+  for (cv in cont_vars) {
+    for (iv in cat_interact_vars) {
+      col_name <- paste0(cv, "_x_", iv)
+      df[[col_name]] <- df[[cv]] * as.integer(df[[iv]])
+      if (df_name == "train") cont_x_cat_cols <- c(cont_x_cat_cols, col_name)
+    }
+  }
+  assign(df_name, df)
 }
-
 
 
 
