@@ -304,50 +304,72 @@ for (df_name in c("train", "test", "new_hires")) {
   assign(df_name, df)
 }
 
-# --- (d) Continuous × continuous pairwise interactions ---
+# --- (d) Polynomials ---
+add_polynomials <- function(data, vars, degree = 7) {
+  poly_list <- lapply(vars, function(v) {
+    sapply(2:degree, function(d) {
+      setNames(data.frame(data[[v]]^d), paste(v, '_deg', d, sep = ""))
+    }, simplify = FALSE)
+  })
+  bind_cols(data, do.call(bind_cols, unlist(poly_list, recursive = FALSE)))
+}
+
+cont_vars_poly <- c("yos", "exp", "age", "famsize", "nchlt5", "hoursworked")   # omit exp2
+train     <- add_polynomials(train,     cont_vars_poly, degree = 7)
+test      <- add_polynomials(test,      cont_vars_poly, degree = 7)
+new_hires <- add_polynomials(new_hires, cont_vars_poly, degree = 7)
+
+# --- (e) Continuous × continuous pairwise interactions ---
 # All unique pairs of continuous variables are multiplied together.
 # Lasso in Step 12 will zero out irrelevant pairs automatically.
-cont_x_cont_cols <- c()   # populated below; added to feature_cols in Step 9
-
-cont_pairs <- combn(cont_vars, 2, simplify = FALSE)
-
-for (df_name in c("train", "test", "new_hires")) {
-  df <- get(df_name)
-  for (p in cont_pairs) {
-    col_name <- paste0(p[1], "_x_", p[2])
-    df[[col_name]] <- df[[p[1]]] * df[[p[2]]]
-    if (df_name == "train") cont_x_cont_cols <- c(cont_x_cont_cols, col_name)
-  }
-  assign(df_name, df)
+add_cont_interactions <- function(data, vars) {
+  pairs    <- combn(vars, 2, simplify = FALSE)
+  int_list <- lapply(pairs, function(p) {
+    setNames(data.frame(data[[p[1]]] * data[[p[2]]]), paste0(p[1], "_x_", p[2]))
+  })
+  bind_cols(data, do.call(bind_cols, int_list))
 }
 
-# --- (e) Continuous × categorical interactions ---
-# Specify which categorical variables (nominal or ordinal) to interact with ALL
-# continuous variables. Factor/ordered columns are converted to their integer
-# code so each interaction remains a single numeric column suitable for glmnet.
+train     <- add_cont_interactions(train,     cont_vars_poly)
+test      <- add_cont_interactions(test,      cont_vars_poly)
+new_hires <- add_cont_interactions(new_hires, cont_vars_poly)
+
+# --- (f) Continuous × categorical interactions ---
 # Add or remove entries from cat_interact_vars as needed.
+# Factor/ordered columns are coerced to integer so each interaction is a single
+# numeric column suitable for glmnet.
 cat_interact_vars <- c("sex", "region", "schltype", "degfield", "education")
 
-cont_x_cat_cols <- c()   # populated below; added to feature_cols in Step 9
-
-for (df_name in c("train", "test", "new_hires")) {
-  df <- get(df_name)
-  for (cv in cont_vars) {
-    for (iv in cat_interact_vars) {
-      col_name <- paste0(cv, "_x_", iv)
-      df[[col_name]] <- df[[cv]] * as.integer(df[[iv]])
-      if (df_name == "train") cont_x_cat_cols <- c(cont_x_cat_cols, col_name)
-    }
-  }
-  assign(df_name, df)
+add_cat_interactions <- function(data, cont_v, cat_v) {
+  int_list <- lapply(cont_v, function(cv) {
+    lapply(cat_v, function(iv) {
+      setNames(data.frame(data[[cv]] * as.integer(data[[iv]])),
+               paste0(cv, "_x_", iv))
+    })
+  })
+  bind_cols(data, do.call(bind_cols, unlist(int_list, recursive = FALSE)))
 }
+
+train     <- add_cat_interactions(train,     cont_vars_poly, cat_interact_vars)
+test      <- add_cat_interactions(test,      cont_vars_poly, cat_interact_vars)
+new_hires <- add_cat_interactions(new_hires, cont_vars_poly, cat_interact_vars)
 
 # =============================================================================
 # STEP 9: BUILD DESIGN MATRICES  (model.matrix for Lasso / Ridge / Trees)
 # =============================================================================
 
+# Derive interaction column names from the same logic used to build them
+cont_x_cont_cols <- unlist(lapply(combn(cont_vars_poly, 2, simplify = FALSE),
+                                   function(p) paste0(p[1], "_x_", p[2])))
+cont_x_cat_cols  <- unlist(lapply(cont_vars_poly, function(cv)
+                             lapply(cat_interact_vars, function(iv)
+                               paste0(cv, "_x_", iv))))
+poly_cols        <- unlist(lapply(cont_vars_poly, function(v)
+                             paste0(v, "_deg", 2:7)))
+
 feature_cols <- c(cont_vars,
                   "log_hours", "exp_yos", "exp2_yos", "family_burden",
+                  poly_cols,
                   cont_x_cont_cols,
                   cont_x_cat_cols,
                   bin_vars, cat_vars)

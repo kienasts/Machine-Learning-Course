@@ -187,8 +187,8 @@ for (var in cat_vars_nom) {
   new_hires[[var]] <- factor(new_hires[[var]], levels = levels(train[[var]]))
   
   # unseen levels
-  test[[var]]      <- fct_explicit_na(test[[var]],      na_level = imputed$cat_modes[[var]])
-  new_hires[[var]] <- fct_explicit_na(new_hires[[var]], na_level = imputed$cat_modes[[var]])
+  #test[[var]]      <- fct_explicit_na(test[[var]],      na_level = imputed$cat_modes[[var]])
+  #new_hires[[var]] <- fct_explicit_na(new_hires[[var]], na_level = imputed$cat_modes[[var]])
 }
 
 # Ordinal encoding (integer encoding)
@@ -204,11 +204,13 @@ for (var in bin_vars) {
   if (is.factor(train[[var]])) {
     train[[var]] <- as.integer(train[[var]]) - 1L
     test[[var]] <- as.integer(test[[var]]) - 1L
+    new_hires[[var]] <- as.integer(new_hires[[var]]) - 1L
   }
   # If stored as logical
   if (is.logical(train[[var]])) {
     train[[var]] <- as.integer(train[[var]])
     test[[var]] <- as.integer(test[[var]])
+    new_hires[[var]] <- as.integer(new_hires[[var]])
   }
 }
 
@@ -230,40 +232,110 @@ add_polynomials <- function(data, vars, degree = 7) {
   bind_cols(data, do.call(bind_cols, unlist(poly_list, recursive = FALSE)))
 }
 
-cont_vars <- c("yos", "exp", "age", "famsize", "nchlt5", "hoursworked") # omit exp2
-train <- add_polynomials(train, cont_vars, degree = 7)
-test  <- add_polynomials(test, cont_vars, degree = 7)
-new_hires <- add_polynomials(new_hires, cont_vars, degree = 7)
+cont_vars_poly <- c("yos", "exp", "age", "famsize", "nchlt5", "hoursworked") # omit exp2
+train <- add_polynomials(train, cont_vars_poly, degree = 7)
+test  <- add_polynomials(test, cont_vars_poly, degree = 7)
+new_hires <- add_polynomials(new_hires, cont_vars_poly, degree = 7)
 
 # Interactions (continuous x continuous)
-cont_x_cont_cols <- c()
-cont_pairs <- combn(cont_vars, 2, simplify = FALSE)
-
-for (df_name in c("train", "test", "new_hires")) {
-  df <- get(df_name)
-  for (p in cont_pairs) {
-    col_name <- paste0(p[1], "_x_", p[2])
-    df[[col_name]] <- df[[p[1]]] * df[[p[2]]]
-    if (df_name == "train") cont_x_cont_cols <- c(cont_x_cont_cols, col_name)
-  }
-  assign(df_name, df)
+add_cont_interactions <- function(data, vars) {
+  pairs <- combn(vars, 2, simplify = FALSE)
+  interaction_list <- lapply(pairs, function(p) {
+    setNames(data.frame(data[[p[1]]] * data[[p[2]]]), paste0(p[1], '_x_', p[2]))
+  })
+  bind_cols(data, do.call(bind_cols, interaction_list))
 }
 
-# Interactions (categorical x continuous)
-cat_interact_vars <- c("sex", "marst", "race", "region")
-cont_x_cat_cols <- c()
+train <- add_cont_interactions(train, cont_vars_poly)
+test  <- add_cont_interactions(test, cont_vars_poly)
+new_hires <- add_cont_interactions(new_hires, cont_vars_poly)
 
-for (df_name in c("train", "test", "new_hires")) {
-  df <- get(df_name)
-  for (cv in cont_vars) {
-    for (iv in cat_interact_vars) {
-      col_name <- paste0(cv, "_x_", iv)
-      df[[col_name]] <- df[[cv]] * as.integer(df[[iv]])
-      if (df_name == "train") cont_x_cat_cols <- c(cont_x_cat_cols, col_name)
+# Interactions (dummies&categorical x continuous)
+cat_interaction_vars <- c(bin_vars, cat_vars)
+
+add_cat_interactions <- function(data, cont_v, cat_v) {
+  interaction_list <- lapply(cont_v, function(cv) {
+    lapply(cat_v, function(iv) {
+      setNames(data.frame(data[[cv]] * as.integer(data[[iv]])), paste0(cv, '_x_', iv))
+    })
+  })
+  bind_cols(data, do.call(bind_cols, unlist(interaction_list, recursive = FALSE)))
+}
+
+train <- add_cat_interactions(train, cont_vars_poly, cat_interaction_vars)
+test  <- add_cat_interactions(test, cont_vars_poly, cat_interaction_vars)
+new_hires <- add_cat_interactions(new_hires, cont_vars_poly, cat_interaction_vars)
+
+
+
+# Design Matrices ---------------------------------------------------------
+cont_x_cont_cols <- unlist(lapply(combn(cont_vars_poly, 2, simplify = FALSE),
+                                  function(p) paste0(p[1], "_x_", p[2])))
+cont_x_cat_cols  <- unlist(lapply(cont_vars_poly, function(cv)
+  lapply(cat_interaction_vars, function(iv)
+    paste0(cv, "_x_", iv))))
+poly_cols <- unlist(lapply(cont_vars_poly, function(v)
+  paste0(v, "_deg", 2:7)))
+
+feature_cols <- c(cont_vars,
+                  poly_cols,
+                  cont_x_cont_cols,
+                  cont_x_cat_cols,
+                  bin_vars, cat_vars)
+
+build_matrix <- function(df, ref_df = NULL) {
+  if (!is.null(ref_df)) {
+    for (v in cat_vars_nom) {
+      df[[v]] <- factor(df[[v]], levels = levels(ref_df[[v]]))
     }
   }
-  assign(df_name, df)
+  X <- model.matrix(~ . - 1,
+                    data = df[, feature_cols, drop = FALSE])
+  return(X)
 }
+
+X_train <- build_matrix(train)
+X_test <- build_matrix(test, ref_df = train)
+X_new_hires <- build_matrix(new_hires, ref_df = train)
+
+#X_test      <- X_test[,      colnames(X_train), drop = FALSE]
+#X_new_hires <- X_new_hires[, colnames(X_train), drop = FALSE]
+
+# Feature Selection -------------------------------------------------------
+
+# Drop columns with near-zero variance
+nzv_idx <- nearZeroVar(X_train)
+if (length(nzv_idx) > 0) {
+  X_train     <- X_train[,     -nzv_idx]
+  X_test      <- X_test[,      -nzv_idx]
+  X_new_hires <- X_new_hires[, -nzv_idx]
+}
+
+# Drop highly correlated features
+cor_mat     <- cor(X_train, use = "pairwise.complete.obs")
+high_cor    <- findCorrelation(cor_mat, cutoff = 0.95)
+if (length(high_cor) > 0) {
+  X_train     <- X_train[,     -high_cor]
+  X_test      <- X_test[,      -high_cor]
+  X_new_hires <- X_new_hires[, -high_cor]
+}
+
+
+
+# Checks ------------------------------------------------------------------
+
+stopifnot("NA in X_train" = sum(is.na(X_train)) == 0)
+stopifnot("NA in X_test" = sum(is.na(X_test)) == 0)
+stopifnot("NA in X_new_hires" = sum(is.na(X_new_hires)) == 0)
+stopifnot("Column mismatch train/test" = identical(colnames(X_train), colnames(X_test)))
+stopifnot("Column mismatch train/new_hires" = identical(colnames(X_train), colnames(X_new_hires)))
+
+
+setdiff(colnames(X_train), colnames(X_test))
+setdiff(colnames(X_train), colnames(X_new_hires))
+
+
+
 
 
 
