@@ -1,8 +1,10 @@
 # Preliminaries -----------------------------------------------------------
 
 packages <- c(
-  "tidyverse",    # data science
-  "janitor",       # data cleaning
+  "tidyverse",      # data science
+  "janitor",        # data cleaning
+  "rpart",
+  "caret", 
   "glmnet",
   "randomForest",
   "rpart",
@@ -47,7 +49,6 @@ corrplot(cor)
 
 glimpse(wage_training_raw)
 sapply(wage_training_raw, class)
-
 sapply(wage_training_raw[sapply(wage_training_raw, is.numeric)], function(x) length(unique(x)))
 
 intended_types <- list(
@@ -82,9 +83,7 @@ check_fix_var_types <- function(df, intended, label){
         if (length(lvls) != 2) warning(paste0("Variable ", var, ": length differs from 2."))
         df[[var]] <- as.integer(df[[var]] == lvls[2])
       }
-    }
-    
-    else if (actual == "factor") {
+    } else if (actual == "factor") {
       df[[var]] <- as.integer(as.character(df[[var]]))
     }
   } 
@@ -138,13 +137,20 @@ cont_vars <- c("yos", "exp", "exp2", "age", "famsize", "nchlt5", "hoursworked")
 bin_vars <- c("sex", "hispanic", "vetstat", "dchlt5", "dchlt19", "msa")
 cat_vars_nom <- c("marst", "race", "degfield", "educd", "education", "ind1990c", "occ2010c", "region", "metro")
 cat_vars_ord <- c("speakeng", "hw")
+cat_vars <- c(cat_vars_nom, cat_vars_ord)
+ord_levels <- list(
+  speakeng = c("Does not speak English", "Yes, but not well", "Yes, speaks well", "Yes, speaks very well", "Yes, speaks only English"),
+  hw = c("Lessthan40", "40to49", "50to59", "60to69", "70plus")
+)
 
 colMeans(is.na(train))
 
+# drop zero variance variables
 zero_var <- sapply(train, function(x) length(unique(x[!is.na(x)])) < 2)
 cat("Zero-variance variables:", names(which(zero_var)), "\n")
 train <- train[, !zero_var]
 test  <- test[,  names(train)]
+#new_hires <- new_hires[, !zero_var]
 
 colSums(is.na(train))
 colSums(is.na(test))
@@ -157,14 +163,99 @@ colSums(is.na(test))
 
 # Categorical Variables ---------------------------------------------------
 
-# Rare category pooling
+# Rare category pooling (nominal only)
 rare_levels <- lapply(train[cat_vars_nom], function(x) {
   freq <- prop.table(table(x))
   names(freq[freq < 0.02])
 })
 
 for (var in cat_vars_nom) {
+  train[[var]]      <- ifelse(train[[var]] %in% rare_levels[[var]], "Other", train[[var]])
+  test[[var]]       <- ifelse(test[[var]] %in% rare_levels[[var]], "Other", test[[var]])
+  new_hires[[var]]  <- ifelse(new_hires[[var]] %in% rare_levels[[var]], "Other", new_hires[[var]])  
   
+  # unseen levels
+  unseen            <- setdiff(unique(test[[var]]), unique(train[[var]]))
+  test[[var]]       <- ifelse(test[[var]] %in% unseen, "Other", test[[var]])
+  new_hires[[var]]  <- ifelse(new_hires[[var]] %in% unseen, "Other", new_hires[[var]])
+}
+
+# Nominal encoding (one-hot encoding)
+for (var in cat_vars_nom) {
+  train[[var]] <- factor(train[[var]])
+  test[[var]]  <- factor(test[[var]], levels = levels(train[[var]]))
+  new_hires[[var]] <- factor(new_hires[[var]], levels = levels(train[[var]]))
+  
+  # unseen levels
+  test[[var]]      <- fct_explicit_na(test[[var]],      na_level = imputed$cat_modes[[var]])
+  new_hires[[var]] <- fct_explicit_na(new_hires[[var]], na_level = imputed$cat_modes[[var]])
+}
+
+# Ordinal encoding (integer encoding)
+for (var in cat_vars_ord) {
+  train[[var]] <- ordered(train[[var]], levels = ord_levels[[var]])
+  test[[var]]  <- ordered(test[[var]],  levels = ord_levels[[var]])
+  new_hires[[var]] <- ordered(new_hires[[var]], levels = ord_levels[[var]])
+}
+
+# Binary variables
+for (var in bin_vars) {
+  # If stored as factor with two levels
+  if (is.factor(train[[var]])) {
+    train[[var]] <- as.integer(train[[var]]) - 1L
+    test[[var]] <- as.integer(test[[var]]) - 1L
+  }
+  # If stored as logical
+  if (is.logical(train[[var]])) {
+    train[[var]] <- as.integer(train[[var]])
+    test[[var]] <- as.integer(test[[var]])
+  }
+}
+
+
+
+# Scale Continuous Variables ----------------------------------------------
+
+
+
+# Feature Construction ----------------------------------------------------
+
+# Polynomials
+add_polynomials <- function(data, vars, degree = 7) {
+  poly_list <- lapply(vars, function(v) {
+    sapply(2:degree, function(d) {
+      setNames(data.frame(data[[v]]^d), paste(v, '_deg', d, sep = ""))
+    }, simplify = FALSE)
+  })
+  bind_cols(data, do.call(bind_cols, unlist(poly_list, recursive = FALSE)))
+}
+
+cont_vars <- c("yos", "exp", "age", "famsize", "nchlt5", "hoursworked") # omit exp2
+train <- add_polynomials(train, cont_vars, degree = 7)
+test  <- add_polynomials(test, cont_vars, degree = 7)
+new_hires <- add_polynomials(new_hires, cont_vars, degree = 7)
+
+# Interactions (continuous x continuous)
+add_interactions <- function(data, vars) {
+  pairs <- combn(vars, 2, simplify = FALSE)
+  int_cols <- lapply(pairs, function(p) {
+    set_names(data.frame(data[[p[1]]] * data[[p[2]]]), paste0(p[1], "_x_", p[2]))
+  })
+  bind_cols(data, do.call(bind_cols, int_cols))
+}
+
+train <- add_interactions(train, cont_vars)
+test  <- add_interactions(test, cont_vars)
+new_hires <- add_interactions(new_hires, cont_vars)
+
+# Interactions (categorical x continuous)
+cat_interact_vars <- c("sex", "marst", "race", "region")
+
+interaction_cols <- c()
+
+for (df_name in c("train", "test", "new_hires")) {
+  df <- get_(df_name)
+  for (cv in )
 }
 
 
