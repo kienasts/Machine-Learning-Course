@@ -300,6 +300,10 @@ X_train <- build_matrix(train)
 X_test <- build_matrix(test, ref_df = train)
 X_new_hires <- build_matrix(new_hires, ref_df = train)
 
+X_train2 <- as.matrix(train[, c(2:ncol(train))])
+
+
+
 #X_test      <- X_test[,      colnames(X_train), drop = FALSE]
 #X_new_hires <- X_new_hires[, colnames(X_train), drop = FALSE]
 
@@ -386,6 +390,12 @@ print(paste0("Optimal number final leaves: ", op_size))
 cp_vals <- tree$cptable[op_index, "CP"]
 pruned_tree <- prune(tree, cp = cp_vals)
 rpart.plot(pruned_tree, digits = 3)
+
+pred_tree_test <- predict(pruned_tree, newdata = as.data.frame(X_test))
+results$tree <- list(
+  model = pruned_tree,
+  mse = mse(y_test, pred_tree_test)
+)
 
 
 
