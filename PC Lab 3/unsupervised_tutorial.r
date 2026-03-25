@@ -24,21 +24,22 @@ sum(missings == 0)
 s_missings <- missings/(ncol(votes)-1)
 
 # Histogram with 100 bins
-hist(???, breaks = 100)
+hist(s_missings, breaks = 100)
 
 # Counts - yes and nos
-yeas <- rowSums(votes[,(1:ncol(votes))]== ???)
-nays <- rowSums(votes[,(1:ncol(votes))]== ???)
+yeas <- rowSums(votes[,(1:ncol(votes))]== 1)
+nays <- rowSums(votes[,(1:ncol(votes))]== -1)
 
 # Plots - Party
 plot(yeas, nays, col = members$party)
 legend('topleft', legend = levels(members$party), col = 1:3,  pch = 1)
 
 # PCA
-pr.out = prcomp(??? , center = TRUE, scale = TRUE)
+pr.out = prcomp(votes , center = TRUE, scale = TRUE)
 
 # No of principal components
 dim(pr.out$rotation)[2]
+# -> number of politicians < number of votes
 
 # variance explained by each component
 pr.var = pr.out$sdev^2
@@ -52,16 +53,19 @@ pve[1:10]
 # Plot the first 10 PC
 barplot(pve[1:10], xlab=" Principal Component ", ylab=" Proportion of Variance Explained ", ylim=c(0,1))
 barplot(cumsum(pve[1:10]), xlab=" Principal Component ", ylab ="Cumulative Proportion of Variance Explained ", ylim=c(0,1))
+# -> 2 or 3 PC seems reasonable
 
 # Plot the first two principal components, color the party membership
 plot(pr.out$x[,1], pr.out$x[,2], xlab = "PC1", ylab = "PC2", col = members$party, main = "Top two PC directions")
 legend('bottomright', legend = levels(members$party), col = 1:3,  pch = 1)
+# -> PC1 could be party affiliation
 
 ## Far right (very conservative)
-head(sort(???))
+head(sort(pr.out$x[,1]))
 
 ## Far left (very liberal)
-head(sort(???, decreasing=???))
+head(sort(pr.out$x[,1], decreasing=TRUE))
+# -> PC1 does seem to be party affiliation
 
 # PC 2
 head(sort(???))
@@ -120,5 +124,13 @@ km.out = kmeans (votes,6, nstart = ???)
 km.out$tot.withinss
 
 print('With nstart = 20')
+km.out =kmeans (votes,6, nstart = ???)
+km.out$tot.withinss
+
+print('With nstart = 100')
+km.out =kmeans (votes,6, nstart = ???)
+km.out$tot.withinss
+
+print('With nstart = 500')
 km.out =kmeans (votes,6, nstart = ???)
 km.out$tot.withinss
